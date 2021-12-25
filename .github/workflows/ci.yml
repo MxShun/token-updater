@@ -1,0 +1,51 @@
+name: Token Updater
+
+on:
+  schedule:
+　   - cron: '* 0 1 */3 *'
+  workflow_dispatch:
+
+jobs:
+  update-the-token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the default branch
+        uses: actions/checkout@v2
+      - name: Set the git configurations
+        run: |
+          git config user.name ${{ secrets.GITHUB_USER_NAME }}
+          git config user.email ${{ secrets.GITHUB_USER_EMAIL }}
+      - name: Add a new token
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TODAY=`date +'%Y-%m-%d'`
+          BRANCH_NAME="add/token-${TODAY}"
+          echo "ADDITION_BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+          git checkout -b $BRANCH_NAME
+
+          TOKEN=$(echo `date` | sha256sum | sed -e "s/.\{3\}$//")
+          echo "TOKEN=${TOKEN}" >> $GITHUB_ENV
+          NEW_PROPERTY=$(cat ./application.properties | sed -e "/^token=[0-9a-zA-Z]\{64\}/s/$/,`echo $TOKEN`/")
+          cat <<< $NEW_PROPERTY > ./application.properties
+
+          git add ./application.properties
+          git commit -m "Add a new token on ${TODAY}"
+          git push -u origin $BRANCH_NAME
+          hub pull-request -b ${{ github.event.repository.default_branch }} -h $BRANCH_NAME -m "API Token定期更新 新規トークンの追加"
+      - name: Truncate the old token
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SWITCH_DATE=`date -d '14 days' +'%Y-%m-%d'`
+          echo "SWITCH_DATE=${SWITCH_DATE}" >> $GITHUB_ENV
+          BRANCH_NAME="truncate/token-${SWITCH_DATE}"
+          git checkout -b $BRANCH_NAME
+
+          NEW_PROPERTY=$(cat ./application.properties | sed -e "s/^token=[0-9a-zA-Z]\{64\},/token=/")
+          cat <<< $NEW_PROPERTY > ./application.properties
+
+          git add ./application.properties
+          git commit -m "Truncate the old token on ${SWITCH_DATE}"
+          git push -u origin $BRANCH_NAME
+          hub pull-request -b $ADDITION_BRANCH_NAME -h $BRANCH_NAME -m "API Token定期更新 旧トークンの無効化【切替日時：${SWITCH_DATE}】"
